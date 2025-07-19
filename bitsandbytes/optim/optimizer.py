@@ -718,9 +718,6 @@ class Optimizer1State(Optimizer8bit):
         p.data = p.data.contiguous()
         p.grad = p.grad.contiguous()
 
-        rows = p.shape[0]
-        cols = p.shape[1]
-
         state = self.state[p]
         grad = p.grad
 

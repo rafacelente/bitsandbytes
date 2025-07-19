@@ -2896,6 +2896,25 @@ MAKE_Optimizer32bit1State(ADAGRAD, half)
 MAKE_Optimizer32bit1State(ADAGRAD, float)
 MAKE_Optimizer32bit1State(ADAGRAD, __nv_bfloat16)
 
+#define MAKE_Optimizer32bit1State_Muon(gtype)                                     \
+    template __global__ void kOptimizer32bit1State_Muon<gtype>(                   \
+        gtype* g, gtype* p, float* state1, const float beta1, const int step,     \
+        const float gnorm_scale, const int n);
+
+#define MAKE_UpdateParams_Muon(gtype)                                             \
+    template __global__ void kUpdateParams_Muon<gtype>(                           \
+        gtype* p, const float* u, const float lr, const float wd,                 \
+        const float adjusted_lr, const int n);
+
+MAKE_Optimizer32bit1State_Muon(float)
+MAKE_Optimizer32bit1State_Muon(half)
+MAKE_Optimizer32bit1State_Muon(__nv_bfloat16)
+
+MAKE_UpdateParams_Muon(float)
+MAKE_UpdateParams_Muon(half)
+MAKE_UpdateParams_Muon(__nv_bfloat16)
+
+
 #define MAKE_PreconditionOptimizer32bit2State(oname, gtype)                                                            \
     template __global__ void kPreconditionOptimizer32bit2State<gtype, oname, 4096, 8>(                                 \
         gtype * g, gtype * p, float* state1, float* state2, float* unorm, const float beta1, const float beta2,        \
