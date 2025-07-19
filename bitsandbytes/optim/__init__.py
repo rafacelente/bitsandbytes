@@ -20,3 +20,4 @@ from .lion import Lion, Lion8bit, Lion32bit, PagedLion, PagedLion8bit, PagedLion
 from .optimizer import GlobalOptimManager
 from .rmsprop import RMSprop, RMSprop8bit, RMSprop32bit
 from .sgd import SGD, SGD8bit, SGD32bit
+from .muon import Muon32bit, Muon

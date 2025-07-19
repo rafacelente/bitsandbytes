@@ -718,6 +718,9 @@ class Optimizer1State(Optimizer8bit):
         p.data = p.data.contiguous()
         p.grad = p.grad.contiguous()
 
+        rows = p.shape[0]
+        cols = p.shape[1]
+
         state = self.state[p]
         grad = p.grad
 
@@ -755,6 +758,7 @@ class Optimizer1State(Optimizer8bit):
                 state["unorm_vec"] if config["max_unorm"] > 0.0 else None,
                 max_unorm=config["max_unorm"],
                 skip_zeros=config["skip_zeros"],
+                ns_steps=5,
             )
 
         elif state["state1"].dtype == torch.uint8 and not config["block_wise"]:

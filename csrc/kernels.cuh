@@ -48,6 +48,19 @@ __global__ void kOptimizer32bit1State(
     const float gnorm_scale, const bool skip_zeros, const int n
 );
 
+template <typename T>
+__global__ void kUpdateParams_Muon(
+    T* p, const float* u, const float lr, const float wd, const float adjusted_lr, const int n
+);
+
+template <typename T>
+__global__ void kOptimizer32bit1State_Muon(
+    T* g, T* p, float* state1, const float beta1, const int step, const float gnorm_scale, const int n
+);
+
+__global__ void combine_matrices_kernel(float* B, const float* A1, const float* A2, float b, float c, int dim);
+
+
 template <typename T, int OPTIMIZER>
 __global__ void kPreconditionOptimizerStatic8bit1State(
     T* p, T* __restrict__ const g, unsigned char* __restrict__ const state1, float* unorm, const float beta1,

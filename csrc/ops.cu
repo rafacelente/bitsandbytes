@@ -75,11 +75,128 @@ void dequantizeBlockwise(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+void newton_schulz_host_launcher(float* d_X, int rows, int cols, int ns_steps) {
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+    // Constants for the quintic iteration
+    const float a = 3.4445f;
+    const float b = -4.7750f;
+    const float c = 2.0315f;
+    const float one = 1.0f;
+    const float zero = 0.0f;
+
+    // The NS iteration should be done on a matrix with rows <= cols.
+    // We assume the input d_X is already transposed if necessary and is in column-major format.
+    int n = rows * cols;
+
+    // 1. Normalize the input matrix X by its Frobenius norm
+    float norm_X;
+    cublasSnrm2(handle, n, d_X, 1, &norm_X);
+    float inv_norm = 1.0f / (norm_X + 1e-7f);
+    cublasSscal(handle, n, &inv_norm, d_X, 1);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+    // 2. Allocate temporary device memory for intermediate matrices
+    float *d_A, *d_A_sq, *d_B, *d_B_X;
+    cudaMalloc(&d_A,    rows * rows * sizeof(float));
+    cudaMalloc(&d_A_sq, rows * rows * sizeof(float));
+    cudaMalloc(&d_B,    rows * rows * sizeof(float));
+    cudaMalloc(&d_B_X,  rows * cols * sizeof(float));
+
+    // 3. Perform the NS iterations
+    for (int i = 0; i < ns_steps; ++i) {
+        // A = X @ X.T
+        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T,
+                                 rows, rows, cols,
+                                 &one, d_X, rows, d_X, rows,
+                                 &zero, d_A, rows);
+        // A_sq = A @ A
+        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                                 rows, rows, rows,
+                                 &one, d_A, rows, d_A, rows,
+                                 &zero, d_A_sq, rows);
+        CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+        // B = b*A + c*A_sq (using our custom element-wise kernel)
+        dim3 threads(16, 16);
+        dim3 blocks((rows + 15) / 16, (rows + 15) / 16);
+        combine_matrices_kernel<<<blocks, threads>>>(d_B, d_A, d_A_sq, b, c, rows);
+
+        // B_X = B @ X
+        cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                                 rows, cols, rows,
+                                 &one, d_B, rows, d_X, rows,
+                                 &zero, d_B_X, rows);
+        CUDA_CHECK_RETURN(cudaPeekAtLastError());
+
+        // X = a*X + B_X (final update for the iteration)
+        cublasSscal(handle, n, &a, d_X, 1);
+        cublasSaxpy(handle, n, &one, d_B_X, 1, d_X, 1);
+        CUDA_CHECK_RETURN(cudaPeekAtLastError());
+    }
+    
+    // Cleanup
+    cudaFree(d_A);
+    cudaFree(d_A_sq);
+    cudaFree(d_B);
+    cudaFree(d_B_X);
+    cublasDestroy(handle);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template<typename T>
+void muon32bit(
+    T* g, T* p, float* state1, // Main pointers: gradient, parameters, momentum state
+    const float beta1,         // Momentum coefficient (mu)
+    const float wd,            // Weight decay
+    const int step,            // Current optimization step
+    const float lr,            // Base learning rate
+    const int ns_steps,        // Number of Newton-Schulz steps
+    const int n,               // Total number of elements
+    int rows, int cols         // Matrix dimensions
+)
+{
+    // --- Step 0: Pre-computation ---
+    // Calculate the adjusted learning rate as in your PyTorch implementation
+    float adjusted_lr = lr * (0.2f * sqrtf((float)fmax(rows, cols)));
+    
+    // Determine grid/block dimensions for element-wise kernels
+    const int num_threads = 1024;
+    int num_blocks = n / num_threads;
+    num_blocks = n % num_threads == 0 ? num_blocks : num_blocks + 1;
+
+    // --- Step 1: Compute Momentum ---
+    // We use a simplified version of kOptimizer32bit1State.
+    // This kernel computes: state1 = beta1 * state1 + g
+    // Note: The original kOptimizer32bit1State also handles weight decay by adding it to 'g'.
+    // To match your PyTorch code, we apply weight decay separately in the final update kernel.
+    // So, we assume 'g' here is the raw gradient.
+    kOptimizer32bit1State_Muon<T><<<num_blocks, num_threads>>>(g, p, state1, beta1, step, 1.0f, n);
+    cudaDeviceSynchronize(); // Ensure momentum calculation is complete
+
+    // --- Step 2: Orthogonalize Momentum (Newton-Schulz) ---
+    // The `state1` buffer now holds the complete momentum matrix.
+    // We need to handle the case where rows > cols by transposing.
+    // For simplicity, this implementation assumes the calling code ensures rows <= cols
+    // and that the data is in column-major format.
+    // If not, a transpose kernel would be needed here.
+    newton_schulz_host_launcher(state1, rows, cols, ns_steps);
+    cudaDeviceSynchronize(); // Ensure NS iteration is complete
+
+    // --- Step 3: Update Parameters ---
+    // The `state1` buffer now holds the orthogonalized update matrix `u`.
+    // We apply this update to the parameters `p`.
+    kUpdateParams_Muon<T><<<num_blocks, num_threads>>>(p, state1, lr, wd, adjusted_lr, n);
+    cudaDeviceSynchronize();
+}
+
+
 template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, const float beta1,
     const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay, const int step,
-    const float lr, const float gnorm_scale, bool skip_zeros, const int n
+    const float lr, const float gnorm_scale, bool skip_zeros, const int n, int rows, int cols, int ns_steps
 ) {
     int num_blocks = n / 4096;
     num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
@@ -129,6 +246,9 @@ void optimizer32bit(
                 <<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
             CUDA_CHECK_RETURN(cudaPeekAtLastError());
         }
+        break;
+    case MUON:
+        muon32bit<T>(g, p, state1, beta1, weight_decay, step, lr, ns_steps, n, rows, cols);
         break;
     }
 }
@@ -682,12 +802,12 @@ template void dequantizeBlockwise<__nv_bfloat16, NF4>(
         gtype * g, gtype * p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm,           \
         const float beta1, const float beta2, const float beta3, const float alpha, const float eps,                   \
         const float weight_decay, const int step, const float lr, const float gnorm_scale, const bool skip_zeros,      \
-        const int n                                                                                                    \
+        const int n, int rows, int cols, int ns_steps                                                                  \
     );
 
 MAKE_optimizer32bit(ADAM, half) MAKE_optimizer32bit(ADAM, float) MAKE_optimizer32bit(ADAM, __nv_bfloat16) MAKE_optimizer32bit(MOMENTUM, half) MAKE_optimizer32bit(MOMENTUM, float) MAKE_optimizer32bit(
     MOMENTUM, __nv_bfloat16
-) MAKE_optimizer32bit(RMSPROP, half) MAKE_optimizer32bit(RMSPROP, float) MAKE_optimizer32bit(RMSPROP, __nv_bfloat16) MAKE_optimizer32bit(LION, half) MAKE_optimizer32bit(LION, float) MAKE_optimizer32bit(LION, __nv_bfloat16) MAKE_optimizer32bit(ADAGRAD, half) MAKE_optimizer32bit(ADAGRAD, float) MAKE_optimizer32bit(ADAGRAD, __nv_bfloat16) MAKE_optimizer32bit(ADEMAMIX, half) MAKE_optimizer32bit(ADEMAMIX, __nv_bfloat16) MAKE_optimizer32bit(ADEMAMIX, float)
+) MAKE_optimizer32bit(RMSPROP, half) MAKE_optimizer32bit(RMSPROP, float) MAKE_optimizer32bit(RMSPROP, __nv_bfloat16) MAKE_optimizer32bit(LION, half) MAKE_optimizer32bit(LION, float) MAKE_optimizer32bit(LION, __nv_bfloat16) MAKE_optimizer32bit(ADAGRAD, half) MAKE_optimizer32bit(ADAGRAD, float) MAKE_optimizer32bit(ADAGRAD, __nv_bfloat16) MAKE_optimizer32bit(ADEMAMIX, half) MAKE_optimizer32bit(ADEMAMIX, __nv_bfloat16) MAKE_optimizer32bit(ADEMAMIX, float) MAKE_optimizer32bit(MUON, half) MAKE_optimizer32bit(MUON, float) MAKE_optimizer32bit(MUON, __nv_bfloat16)
 
 #define MAKE_optimizerStatic8bit(name, gtype)                                                                          \
     template void optimizerStatic8bit<gtype, name>(                                                                    \

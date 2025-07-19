@@ -917,6 +917,60 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit1State(
     }
 }
 
+template <typename T>
+__launch_bounds__(1024, 1) __global__ void kOptimizer32bit1State_Muon(
+    T* g, T* p, float* state1, const float beta1, const int step, const float gnorm_scale, const int n
+) {
+    // This kernel is simplified for Muon's specific needs.
+    // It performs one task: state1 = beta1 * state1 + g
+    // It assumes g has already been scaled by gnorm_scale and weight_decay.
+    // The loop structure is standard for bitsandbytes element-wise kernels.
+    const int num_threads = blockDim.x * gridDim.x;
+    const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+
+    for (int i = thread_id; i < n; i += num_threads) {
+        float g_val = (float)g[i];
+        
+        // Momentum accumulation (SGD-M)
+        // state1 is the momentum buffer (M)
+        if (step == 1) // On the first step, momentum is just the gradient
+            state1[i] = g_val;
+        else
+            state1[i] = state1[i] * beta1 + g_val;
+    }
+}
+
+__global__ void combine_matrices_kernel(float* B, const float* A1, const float* A2, float b, float c, int dim) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < dim && col < dim) {
+        int idx = col * dim + row; // Assumes column-major layout
+        B[idx] = b * A1[idx] + c * A2[idx];
+    }
+}
+
+template <typename T>
+__global__ void kUpdateParams_Muon(
+    T* p, const float* u, const float lr, const float wd, const float adjusted_lr, const int n
+) {
+    const int num_threads = blockDim.x * gridDim.x;
+    const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+
+    for (int i = thread_id; i < n; i += num_threads) {
+        float p_val = (float)p[i];
+        const float u_val = u[i]; // Orthogonalized update
+
+        // 1. Apply weight decay (as per your PyTorch implementation)
+        p_val *= (1.0f - lr * wd);
+
+        // 2. Apply the orthogonalized update
+        p_val -= adjusted_lr * u_val;
+        
+        p[i] = (T)p_val;
+    }
+}
+
 #define NUM8BIT 16
 #define NUM_THREADS 256
 #define NUM_PER_BLOCK 4096

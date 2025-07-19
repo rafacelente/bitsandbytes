@@ -85,11 +85,11 @@ MAKE_ELEMENTWISE_FUNC(_mul, fp32, float, _MUL)
     void fname##32bit_grad_##gbits(                                                                                    \
         gtype* g, gtype* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm,             \
         const float beta1, const float beta2, const float beta3, const float alpha, const float eps,                   \
-        const float weight_decay, const int step, const float lr, float gnorm_scale, bool skip_zeros, const int n      \
+        const float weight_decay, const int step, const float lr, float gnorm_scale, bool skip_zeros, const int n, const int rows, const int cols, const int ns_steps \
     ) {                                                                                                                \
         optimizer32bit<gtype, oname>(                                                                                  \
             g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, beta3, alpha, eps, weight_decay, step,   \
-            lr, gnorm_scale, skip_zeros, n                                                                             \
+            lr, gnorm_scale, skip_zeros, n, rows, cols, ns_steps                                                                           \
         );                                                                                                             \
     }
 
@@ -108,6 +108,9 @@ MAKE_FUNC32(adagrad, ADAGRAD, half, 16)
 MAKE_FUNC32(ademamix, ADEMAMIX, float, fp32)
 MAKE_FUNC32(ademamix, ADEMAMIX, half, fp16)
 MAKE_FUNC32(ademamix, ADEMAMIX, __nv_bfloat16, bf16)
+MAKE_FUNC32(muon, MUON, float, 32)
+MAKE_FUNC32(muon, MUON, half, 16)
+MAKE_FUNC32(muon, MUON, __nv_bfloat16, bf16)
 
 #define MAKE_FUNC8(fname, oname, gtype, gbits)                                                                         \
     void fname##_static_8bit_grad_##gbits(                                                                             \
@@ -421,11 +424,11 @@ void cdequantize_blockwise_bf16_nf4(
         gtype* g, gtype* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm,             \
         const float beta1, const float beta2, const float beta3, const float alpha, const float eps,                   \
         const float weight_decay, const int step, const float lr, const float gnorm_scale, bool skip_zeros,            \
-        const int n                                                                                                    \
+        const int n, const int rows, const int cols, const int ns_steps                                                                                                   \
     ) {                                                                                                                \
         name##32bit_grad_##gbits(                                                                                      \
             g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, beta3, alpha, eps, weight_decay, step,   \
-            lr, gnorm_scale, skip_zeros, n                                                                             \
+            lr, gnorm_scale, skip_zeros, n, rows, cols, ns_steps                                                                             \
         );                                                                                                             \
     }
 
@@ -444,6 +447,9 @@ MAKE_CFUNC32(adagrad, half, 16)
 MAKE_CFUNC32(ademamix, float, fp32)
 MAKE_CFUNC32(ademamix, half, fp16)
 MAKE_CFUNC32(ademamix, __nv_bfloat16, bf16)
+MAKE_CFUNC32(muon, float, 32)
+MAKE_CFUNC32(muon, half, 16)
+MAKE_CFUNC32(muon, __nv_bfloat16, bf16)
 
 #define MAKE_CFUNC8(name, gtype, gbits)                                                                                \
     void c##name##_static_8bit_grad_##gbits(                                                                           \

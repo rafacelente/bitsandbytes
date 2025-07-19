@@ -45,6 +45,10 @@ str2optimizer8bit = {
         lib.cmomentum_static_8bit_grad_32,
         lib.cmomentum_static_8bit_grad_16,
     ),
+    "muon": (
+        lib.cmuon_static_8bit_grad_32,
+        lib.cmuon_static_8bit_grad_16,
+    ),
 }
 
 
@@ -1136,6 +1140,7 @@ def optimizer_update_32bit(
     unorm_vec: Optional[torch.Tensor] = None,
     max_unorm: float = 0.0,
     skip_zeros=False,
+    ns_steps: int = 5,
 ) -> None:
     """
     Performs an inplace optimizer update with one or two optimizer states.
@@ -1204,6 +1209,7 @@ def optimizer_update_32bit(
         lr,
         gnorm_scale,
         skip_zeros,
+        ns_steps,
     )
 
 
@@ -1601,7 +1607,7 @@ def igemm(
     # this is a mess: cuBLAS expect column major, but PyTorch is row major.
     # So to perform the matrix multiplication, we have to treat A, B, and C matrices
     # (transpose of row major is column major)
-    # This means we compute B^T A^T = C^T and we explicitly switch the dimensions of each of these
+    # This means we compute B^T @ A^T = C^T and we explicitly switch the dimensions of each of these
 
     # matrices in the input arguments for cuBLAS
     # column major: A @ B = C: [m, k] @ [k, n] = [m, n]
@@ -1730,7 +1736,7 @@ def batched_igemm(
     # this is a mess: cuBLAS expect column major, but PyTorch is row major.
     # So to perform the matrix multiplication, we have to treat A, B, and C matrices
     # (transpose of row major is column major)
-    # This means we compute B^T A^T = C^T and we explicitly switch the dimensions of each of these
+    # This means we compute B^T @ A^T = C^T and we explicitly switch the dimensions of each of these
     # matrices in the input arguments for cuBLAS
 
     # column major: A @ B = C: [batch, m, k] @ [batch, k, n] = [batch, m, n]

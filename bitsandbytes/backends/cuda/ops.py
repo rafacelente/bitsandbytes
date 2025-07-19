@@ -574,6 +574,11 @@ str2optimizer32bit = {
         lib.cademamix32bit_grad_fp16,
         lib.cademamix32bit_grad_bf16,
     ),
+    "muon": (
+        lib.cmuon32bit_grad_fp32,
+        lib.cmuon32bit_grad_fp16,
+        lib.cmuon32bit_grad_bf16,
+    ),
 }
 
 str2optimizer8bit_blockwise = {
@@ -607,6 +612,11 @@ str2optimizer8bit_blockwise = {
         lib.cademamix_8bit_blockwise_grad_fp16,
         lib.cademamix_8bit_blockwise_grad_bf16,
     ),
+    "muon": (
+        lib.cmuon_8bit_blockwise_grad_fp32,
+        lib.cmuon_8bit_blockwise_grad_fp16,
+        lib.cmuon_8bit_blockwise_grad_bf16,
+    ),
 }
 
 
@@ -628,7 +638,8 @@ def _optimizer_update_32bit_impl(
     step: int,
     lr: float,
     gnorm_scale: float,
-    skip_zeros=False,
+    skip_zeros: bool = False,
+    ns_steps: int = 5,
 ) -> None:
     optim_fns = str2optimizer32bit.get(optimizer_name, None)
     if optim_fns is None:
@@ -645,6 +656,8 @@ def _optimizer_update_32bit_impl(
         raise ValueError(
             f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
         )
+    rows = g.shape[0]
+    cols = g.shape[1]
 
     with _cuda_device_of(g):
         optim_func(
@@ -666,6 +679,9 @@ def _optimizer_update_32bit_impl(
             ct.c_float(gnorm_scale),
             ct.c_bool(skip_zeros),
             ct.c_int32(g.numel()),
+            ct.c_int32(rows),
+            ct.c_int32(cols),
+            ct.c_int32(ns_steps),
         )
 
 

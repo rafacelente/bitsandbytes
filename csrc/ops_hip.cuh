@@ -69,6 +69,7 @@ typedef enum Optimizer_t {
     ADAGRAD = 4,
     LION = 5,
     ADEMAMIX = 6,
+    MUON = 7,
 } Optimizer_t;
 
 typedef enum Transform_t {

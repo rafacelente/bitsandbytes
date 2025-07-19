@@ -66,7 +66,8 @@ typedef enum Optimizer_t {
     LARS = 3,
     ADAGRAD = 4,
     LION = 5,
-    ADEMAMIX = 6
+    ADEMAMIX = 6,
+    MUON = 7
 } Optimizer_t;
 
 typedef enum Transform_t {
@@ -137,7 +138,7 @@ template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, float beta1, float beta2,
     float beta3, float alpha, float eps, float weight_decay, int step, float lr, const float gnorm_scale,
-    bool skip_zeros, int n
+    bool skip_zeros, int n, int rows, int cols, int ns_steps
 );
 
 template <typename T, int OPTIMIZER>
