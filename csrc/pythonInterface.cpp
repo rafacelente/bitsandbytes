@@ -108,8 +108,8 @@ MAKE_FUNC32(adagrad, ADAGRAD, half, 16)
 MAKE_FUNC32(ademamix, ADEMAMIX, float, fp32)
 MAKE_FUNC32(ademamix, ADEMAMIX, half, fp16)
 MAKE_FUNC32(ademamix, ADEMAMIX, __nv_bfloat16, bf16)
-MAKE_FUNC32(muon, MUON, float, 32)
-MAKE_FUNC32(muon, MUON, half, 16)
+MAKE_FUNC32(muon, MUON, float, fp32)
+MAKE_FUNC32(muon, MUON, half, fp16)
 MAKE_FUNC32(muon, MUON, __nv_bfloat16, bf16)
 
 #define MAKE_FUNC8(fname, oname, gtype, gbits)                                                                         \
@@ -447,8 +447,8 @@ MAKE_CFUNC32(adagrad, half, 16)
 MAKE_CFUNC32(ademamix, float, fp32)
 MAKE_CFUNC32(ademamix, half, fp16)
 MAKE_CFUNC32(ademamix, __nv_bfloat16, bf16)
-MAKE_CFUNC32(muon, float, 32)
-MAKE_CFUNC32(muon, half, 16)
+MAKE_CFUNC32(muon, float, fp32)
+MAKE_CFUNC32(muon, half, fp16)
 MAKE_CFUNC32(muon, __nv_bfloat16, bf16)
 
 #define MAKE_CFUNC8(name, gtype, gbits)                                                                                \

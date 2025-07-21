@@ -50,7 +50,7 @@ class Muon(Optimizer1State):
         if momentum == 0:
             raise NotImplementedError("SGD without momentum is not supported!")
         super().__init__(
-            "momentum",
+            "muon",
             params,
             lr,
             (momentum, dampening),
@@ -168,7 +168,7 @@ class Muon32bit(Optimizer1State):
         if momentum == 0:
             raise NotImplementedError("SGD without momentum is not supported!")
         super().__init__(
-            "momentum",
+            "muon",
             params,
             lr,
             (momentum, dampening),

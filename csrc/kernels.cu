@@ -917,39 +917,62 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit1State(
     }
 }
 
+
+// this is step one of the update for Muon, but does the same as the Momentum update.
+// On Muon original impl, this is:
+/*
+state = self.state[p]
+if "momentum_buffer" not in state:
+    state["momentum_buffer"] = torch.zeros_like(g)
+buf = state["momentum_buffer"]
+buf.mul_(momentum).add_(g)
+if group["nesterov"]: // we only do nesterov
+    g = g.add(buf, alpha=momentum)
+else:
+    g = buf // ignore
+*/
 template <typename T>
 __launch_bounds__(1024, 1) __global__ void kOptimizer32bit1State_Muon(
     T* g, T* p, float* state1, const float beta1, const int step, const float gnorm_scale, const int n
 ) {
-    // This kernel is simplified for Muon's specific needs.
-    // It performs one task: state1 = beta1 * state1 + g
-    // It assumes g has already been scaled by gnorm_scale and weight_decay.
-    // The loop structure is standard for bitsandbytes element-wise kernels.
     const int num_threads = blockDim.x * gridDim.x;
     const int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
 
     for (int i = thread_id; i < n; i += num_threads) {
         float g_val = (float)g[i];
         
-        // Momentum accumulation (SGD-M)
-        // state1 is the momentum buffer (M)
-        if (step == 1) // On the first step, momentum is just the gradient
+        if (step == 1)
             state1[i] = g_val;
         else
             state1[i] = state1[i] * beta1 + g_val;
+
+        state1[i] = state1[i] + beta1 * state1[i];
     }
 }
 
+// needed for combining two matrices alpha * A1 + beta * A2
 __global__ void combine_matrices_kernel(float* B, const float* A1, const float* A2, float b, float c, int dim) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (row < dim && col < dim) {
-        int idx = col * dim + row; // Assumes column-major layout
+        int idx = col * dim + row;
         B[idx] = b * A1[idx] + c * A2[idx];
     }
 }
 
+
+// this is the 3rd step of the update for Muon, happens after the newtonschulz
+// On Muon original impl, this is:
+/*
+
+// adjusted learning rate is applied in the host function
+# apply weight decay
+p.data.mul_(1 - lr * wd)
+
+# apply update
+p.data.add_(u, alpha=-adjusted_lr)
+*/
 template <typename T>
 __global__ void kUpdateParams_Muon(
     T* p, const float* u, const float lr, const float wd, const float adjusted_lr, const int n
@@ -959,12 +982,10 @@ __global__ void kUpdateParams_Muon(
 
     for (int i = thread_id; i < n; i += num_threads) {
         float p_val = (float)p[i];
-        const float u_val = u[i]; // Orthogonalized update
+        const float u_val = u[i];
 
-        // 1. Apply weight decay (as per your PyTorch implementation)
         p_val *= (1.0f - lr * wd);
 
-        // 2. Apply the orthogonalized update
         p_val -= adjusted_lr * u_val;
         
         p[i] = (T)p_val;
@@ -1283,6 +1304,11 @@ __global__ void __launch_bounds__(NUM_THREADS, 2) kPreconditionOptimizerStatic8b
     }
 }
 
+
+// quantiles 1 is new
+// max1 is new
+// new_max1 is new
+// no skip_zeros
 template <typename T, int OPTIMIZER>
 __global__ void __launch_bounds__(1024, 1) kOptimizerStatic8bit1State(
     T* p, T* const g, unsigned char* state1, const float* unorm, const float max_unorm, const float param_norm,

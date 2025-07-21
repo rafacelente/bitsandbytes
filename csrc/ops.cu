@@ -88,23 +88,23 @@ void newton_schulz_host_launcher(float* d_X, int rows, int cols, int ns_steps) {
     const float zero = 0.0f;
 
     // The NS iteration should be done on a matrix with rows <= cols.
-    // We assume the input d_X is already transposed if necessary and is in column-major format.
     int n = rows * cols;
 
-    // 1. Normalize the input matrix X by its Frobenius norm
+    // normalize X
     float norm_X;
-    cublasSnrm2(handle, n, d_X, 1, &norm_X);
+    cublasSnrm2(handle, n, d_X, 1, &norm_X); // fro norm
     float inv_norm = 1.0f / (norm_X + 1e-7f);
-    cublasSscal(handle, n, &inv_norm, d_X, 1);
+    cublasSscal(handle, n, &inv_norm, d_X, 1); // M = X / ||X||
+
+
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
-    // 2. Allocate temporary device memory for intermediate matrices
     float *d_A, *d_A_sq, *d_B, *d_B_X;
     cudaMalloc(&d_A,    rows * rows * sizeof(float));
     cudaMalloc(&d_A_sq, rows * rows * sizeof(float));
     cudaMalloc(&d_B,    rows * rows * sizeof(float));
     cudaMalloc(&d_B_X,  rows * cols * sizeof(float));
 
-    // 3. Perform the NS iterations
+    // ns
     for (int i = 0; i < ns_steps; ++i) {
         // A = X @ X.T
         cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T,
@@ -118,7 +118,7 @@ void newton_schulz_host_launcher(float* d_X, int rows, int cols, int ns_steps) {
                                  &zero, d_A_sq, rows);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
-        // B = b*A + c*A_sq (using our custom element-wise kernel)
+        // B = b*A + c*A_sq
         dim3 threads(16, 16);
         dim3 blocks((rows + 15) / 16, (rows + 15) / 16);
         combine_matrices_kernel<<<blocks, threads>>>(d_B, d_A, d_A_sq, b, c, rows);
@@ -130,13 +130,12 @@ void newton_schulz_host_launcher(float* d_X, int rows, int cols, int ns_steps) {
                                  &zero, d_B_X, rows);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
 
-        // X = a*X + B_X (final update for the iteration)
+        // X = a*X + B_X
         cublasSscal(handle, n, &a, d_X, 1);
         cublasSaxpy(handle, n, &one, d_B_X, 1, d_X, 1);
         CUDA_CHECK_RETURN(cudaPeekAtLastError());
     }
     
-    // Cleanup
     cudaFree(d_A);
     cudaFree(d_A_sq);
     cudaFree(d_B);
@@ -157,36 +156,24 @@ void muon32bit(
     int rows, int cols         // Matrix dimensions
 )
 {
-    // --- Step 0: Pre-computation ---
-    // Calculate the adjusted learning rate as in your PyTorch implementation
+    // calculate adjusted learning rate so we don't need to calculate in the kernel
     float adjusted_lr = lr * (0.2f * sqrtf((float)fmax(rows, cols)));
     
-    // Determine grid/block dimensions for element-wise kernels
     const int num_threads = 1024;
     int num_blocks = n / num_threads;
     num_blocks = n % num_threads == 0 ? num_blocks : num_blocks + 1;
 
-    // --- Step 1: Compute Momentum ---
-    // We use a simplified version of kOptimizer32bit1State.
-    // This kernel computes: state1 = beta1 * state1 + g
-    // Note: The original kOptimizer32bit1State also handles weight decay by adding it to 'g'.
-    // To match your PyTorch code, we apply weight decay separately in the final update kernel.
-    // So, we assume 'g' here is the raw gradient.
+    // step 1: Compute Momentum
     kOptimizer32bit1State_Muon<T><<<num_blocks, num_threads>>>(g, p, state1, beta1, step, 1.0f, n);
-    cudaDeviceSynchronize(); // Ensure momentum calculation is complete
+    cudaDeviceSynchronize();
 
-    // --- Step 2: Orthogonalize Momentum (Newton-Schulz) ---
-    // The `state1` buffer now holds the complete momentum matrix.
-    // We need to handle the case where rows > cols by transposing.
+    // step 2: Orthogonalize Momentum (Newton-Schulz)
     // For simplicity, this implementation assumes the calling code ensures rows <= cols
-    // and that the data is in column-major format.
-    // If not, a transpose kernel would be needed here.
     newton_schulz_host_launcher(state1, rows, cols, ns_steps);
-    cudaDeviceSynchronize(); // Ensure NS iteration is complete
+    cudaDeviceSynchronize();
 
-    // --- Step 3: Update Parameters ---
-    // The `state1` buffer now holds the orthogonalized update matrix `u`.
-    // We apply this update to the parameters `p`.
+    // step 3: Update Parameters
+    // The `state1` buffer now holds the orthogonalized update matrix `u`
     kUpdateParams_Muon<T><<<num_blocks, num_threads>>>(p, state1, lr, wd, adjusted_lr, n);
     cudaDeviceSynchronize();
 }
